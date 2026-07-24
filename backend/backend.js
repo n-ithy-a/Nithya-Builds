@@ -1,228 +1,540 @@
-const express = require('express');
-const cors = require('cors');
-const fs = require('fs');
-const path = require('path');
+const express = require("express");
+const cors = require("cors");
+const pool = require("./db");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Middleware
+// ==================== MIDDLEWARE ====================
+
 app.use(cors());
 app.use(express.json());
 
-// Data file path
-const dataFile = path.join(__dirname, 'data.json');
+// ==================== HELPER ====================
 
-// Initialize data file if it doesn't exist
-const initializeData = () => {
-  if (!fs.existsSync(dataFile)) {
-    const initialData = {
-      blogs: {
-        productManager: [],
-        projects: []
-      },
-      users: {
-        name: "Nithyasree",
-        email: "nithyasreehere@gmail.com",
-        github: "https://github.com/n-ithy-a",
-        linkedin: "https://www.linkedin.com/in/nithyasree-m-09034830a/"
-      }
-    };
-    fs.writeFileSync(dataFile, JSON.stringify(initialData, null, 2));
-  }
-};
+function calculateStreak(rows) {
 
-// Read data from file
-const readData = () => {
-  try {
-    const data = fs.readFileSync(dataFile, 'utf8');
-    return JSON.parse(data);
-  } catch (error) {
-    console.error('Error reading data:', error);
-    return { blogs: { productManager: [], projects: [] }, users: {} };
-  }
-};
+    if (rows.length === 0) return 0;
 
-// Write data to file
-const writeData = (data) => {
-  try {
-    fs.writeFileSync(dataFile, JSON.stringify(data, null, 2));
-  } catch (error) {
-    console.error('Error writing data:', error);
-  }
-};
+    const dates = rows
+        .map(row => new Date(row.published_date))
+        .sort((a, b) => b - a);
 
-// Calculate streak for a category
-const calculateStreak = (blogs) => {
-  if (blogs.length === 0) return 0;
+    let streak = 1;
 
-  const sortedDates = blogs
-    .map(blog => new Date(blog.date))
-    .sort((a, b) => b - a);
+    let current = new Date(dates[0]);
 
-  let streak = 1;
-  let currentDate = new Date(sortedDates[0]);
-  currentDate.setHours(0, 0, 0, 0);
+    current.setHours(0,0,0,0);
 
-  for (let i = 1; i < sortedDates.length; i++) {
-    const prevDate = new Date(sortedDates[i]);
-    prevDate.setHours(0, 0, 0, 0);
+    for(let i=1;i<dates.length;i++){
 
-    const diffDays = Math.floor((currentDate - prevDate) / (1000 * 60 * 60 * 24));
-    if (diffDays === 1) {
-      streak++;
-      currentDate = prevDate;
-    } else {
-      break;
+        let prev = new Date(dates[i]);
+
+        prev.setHours(0,0,0,0);
+
+        const diff = Math.floor(
+
+            (current-prev)/(1000*60*60*24)
+
+        );
+
+        if(diff===1){
+
+            streak++;
+
+            current=prev;
+
+        }
+
+        else{
+
+            break;
+
+        }
+
     }
-  }
 
-  return streak;
-};
+    return streak;
 
-// Initialize data on startup
-initializeData();
+}
 
-// ==================== ROUTES ====================
+// ==================== HOME ====================
 
-// Get all blogs
-app.get('/api/blogs', (req, res) => {
-  const data = readData();
-  res.json({
-    productManager: data.blogs.productManager,
-    projects: data.blogs.projects,
-    streaks: {
-      productManager: calculateStreak(data.blogs.productManager),
-      projects: calculateStreak(data.blogs.projects)
+app.get("/", async(req,res)=>{
+
+    try{
+
+        const result=await pool.query("SELECT NOW()");
+
+        res.json({
+
+            success:true,
+
+            message:"Portfolio Backend Running",
+
+            database:"Connected",
+
+            serverTime:result.rows[0].now
+
+        });
+
     }
-  });
-});
 
-// Get blogs by category
-app.get('/api/blogs/:category', (req, res) => {
-  const { category } = req.params;
-  const data = readData();
-  
-  if (category !== 'productManager' && category !== 'projects') {
-    return res.status(400).json({ error: 'Invalid category' });
-  }
+    catch(err){
 
-  res.json({
-    blogs: data.blogs[category],
-    streak: calculateStreak(data.blogs[category])
-  });
-});
+        res.status(500).json({
 
-// Add new blog
-app.post('/api/blogs', (req, res) => {
-  const { title, content, image, videoUrl, category, date } = req.body;
+            success:false,
 
-  if (!title || !content || !category) {
-    return res.status(400).json({ error: 'Missing required fields' });
-  }
+            error:err.message
 
-  if (category !== 'productManager' && category !== 'projects') {
-    return res.status(400).json({ error: 'Invalid category' });
-  }
+        });
 
-  const data = readData();
-  const newBlog = {
-    id: Date.now(),
-    title,
-    content,
-    image: image || null,
-    videoUrl: videoUrl || null,
-    category,
-    date: date || new Date().toISOString().split('T')[0],
-    createdAt: new Date().toISOString()
-  };
-
-  data.blogs[category].push(newBlog);
-  writeData(data);
-
-  res.status(201).json({
-    success: true,
-    blog: newBlog,
-    streak: calculateStreak(data.blogs[category])
-  });
-});
-
-// Update blog
-app.put('/api/blogs/:id', (req, res) => {
-  const { id } = req.params;
-  const { title, content, image, videoUrl, date } = req.body;
-
-  const data = readData();
-  let found = false;
-
-  for (const category in data.blogs) {
-    const blogIndex = data.blogs[category].findIndex(b => b.id === parseInt(id));
-    if (blogIndex !== -1) {
-      data.blogs[category][blogIndex] = {
-        ...data.blogs[category][blogIndex],
-        title: title || data.blogs[category][blogIndex].title,
-        content: content || data.blogs[category][blogIndex].content,
-        image: image !== undefined ? image : data.blogs[category][blogIndex].image,
-        videoUrl: videoUrl !== undefined ? videoUrl : data.blogs[category][blogIndex].videoUrl,
-        date: date || data.blogs[category][blogIndex].date,
-        updatedAt: new Date().toISOString()
-      };
-      writeData(data);
-      found = true;
-      res.json({ success: true, blog: data.blogs[category][blogIndex] });
-      break;
     }
-  }
 
-  if (!found) {
-    return res.status(404).json({ error: 'Blog not found' });
-  }
 });
 
-// Delete blog
-app.delete('/api/blogs/:id', (req, res) => {
-  const { id } = req.params;
-  const data = readData();
-  let found = false;
+// ==================== GET ALL BLOGS ====================
 
-  for (const category in data.blogs) {
-    const blogIndex = data.blogs[category].findIndex(b => b.id === parseInt(id));
-    if (blogIndex !== -1) {
-      data.blogs[category].splice(blogIndex, 1);
-      writeData(data);
-      found = true;
-      res.json({ success: true, message: 'Blog deleted' });
-      break;
+app.get("/api/blogs", async(req,res)=>{
+
+    try{
+
+        const result=await pool.query(
+
+            `
+            SELECT *
+
+            FROM blogs
+
+            ORDER BY published_date DESC
+            `
+
+        );
+
+        res.json(result.rows);
+
     }
-  }
 
-  if (!found) {
-    return res.status(404).json({ error: 'Blog not found' });
-  }
+    catch(err){
+
+        res.status(500).json({
+
+            error:err.message
+
+        });
+
+    }
+
 });
 
-// Get streaks for all categories
-app.get('/api/streaks', (req, res) => {
-  const data = readData();
-  res.json({
-    productManager: calculateStreak(data.blogs.productManager),
-    projects: calculateStreak(data.blogs.projects)
-  });
+// ==================== GET BLOGS BY CATEGORY ====================
+
+app.get("/api/blogs/category/:category", async(req,res)=>{
+
+    try{
+
+        const {category}=req.params;
+
+        if(
+
+            category!=="productManager"
+
+            &&
+
+            category!=="projects"
+
+        ){
+
+            return res.status(400).json({
+
+                error:"Invalid Category"
+
+            });
+
+        }
+
+        const result=await pool.query(
+
+            `
+
+            SELECT *
+
+            FROM blogs
+
+            WHERE category=$1
+
+            ORDER BY published_date DESC
+
+            `,
+
+            [category]
+
+        );
+
+        res.json(result.rows);
+
+    }
+
+    catch(err){
+
+        res.status(500).json({
+
+            error:err.message
+
+        });
+
+    }
+
 });
 
-// Get user info
-app.get('/api/user', (req, res) => {
-  const data = readData();
-  res.json(data.users);
+// ==================== ADD BLOG ====================
+
+app.post("/api/blogs", async(req,res)=>{
+
+    try{
+
+        const{
+
+            title,
+
+            content,
+
+            image,
+
+            videoUrl,
+
+            category,
+
+            date
+
+        }=req.body;
+
+        const result=await pool.query(
+
+            `
+
+            INSERT INTO blogs
+
+            (
+
+            title,
+
+            content,
+
+            image,
+
+            video_url,
+
+            category,
+
+            published_date
+
+            )
+
+            VALUES
+
+            ($1,$2,$3,$4,$5,$6)
+
+            RETURNING *
+
+            `,
+
+            [
+
+                title,
+
+                content,
+
+                image,
+
+                videoUrl,
+
+                category,
+
+                date
+
+            ]
+
+        );
+
+        res.status(201).json(result.rows[0]);
+
+    }
+
+    catch(err){
+
+        res.status(500).json({
+
+            error:err.message
+
+        });
+
+    }
+
+});
+// ==================== UPDATE BLOG ====================
+
+app.put("/api/blogs/:id", async (req, res) => {
+
+    try {
+
+        const { id } = req.params;
+
+        const {
+
+            title,
+            content,
+            image,
+            videoUrl,
+            category,
+            date
+
+        } = req.body;
+
+        const result = await pool.query(
+
+            `
+            UPDATE blogs
+
+            SET
+
+                title=$1,
+
+                content=$2,
+
+                image=$3,
+
+                video_url=$4,
+
+                category=$5,
+
+                published_date=$6,
+
+                updated_at=NOW()
+
+            WHERE id=$7
+
+            RETURNING *;
+            `,
+
+            [
+
+                title,
+
+                content,
+
+                image,
+
+                videoUrl,
+
+                category,
+
+                date,
+
+                id
+
+            ]
+
+        );
+
+        if (result.rows.length === 0) {
+
+            return res.status(404).json({
+
+                error: "Blog not found"
+
+            });
+
+        }
+
+        res.json({
+
+            success: true,
+
+            blog: result.rows[0]
+
+        });
+
+    }
+
+    catch (err) {
+
+        res.status(500).json({
+
+            error: err.message
+
+        });
+
+    }
+
 });
 
-// Health check
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok' });
+// ==================== DELETE BLOG ====================
+
+app.delete("/api/blogs/:id", async (req, res) => {
+
+    try {
+
+        const { id } = req.params;
+
+        const result = await pool.query(
+
+            `
+            DELETE FROM blogs
+
+            WHERE id=$1
+
+            RETURNING *;
+            `,
+
+            [id]
+
+        );
+
+        if (result.rows.length === 0) {
+
+            return res.status(404).json({
+
+                error: "Blog not found"
+
+            });
+
+        }
+
+        res.json({
+
+            success: true,
+
+            message: "Blog deleted"
+
+        });
+
+    }
+
+    catch (err) {
+
+        res.status(500).json({
+
+            error: err.message
+
+        });
+
+    }
+
 });
 
-// Start server
+// ==================== GET USER ====================
+
+app.get("/api/user", async (req, res) => {
+
+    try {
+
+        const result = await pool.query(
+
+            `
+            SELECT *
+
+            FROM users
+
+            LIMIT 1;
+            `
+
+        );
+
+        res.json(result.rows[0]);
+
+    }
+
+    catch (err) {
+
+        res.status(500).json({
+
+            error: err.message
+
+        });
+
+    }
+
+});
+
+// ==================== GET STREAKS ====================
+
+app.get("/api/streaks", async (req, res) => {
+
+    try {
+
+        const pm = await pool.query(
+
+            `
+            SELECT published_date
+
+            FROM blogs
+
+            WHERE category='productManager'
+
+            ORDER BY published_date DESC;
+            `
+
+        );
+
+        const projects = await pool.query(
+
+            `
+            SELECT published_date
+
+            FROM blogs
+
+            WHERE category='projects'
+
+            ORDER BY published_date DESC;
+            `
+
+        );
+
+        res.json({
+
+            productManager: calculateStreak(pm.rows),
+
+            projects: calculateStreak(projects.rows)
+
+        });
+
+    }
+
+    catch (err) {
+
+        res.status(500).json({
+
+            error: err.message
+
+        });
+
+    }
+
+});
+// ==================== HEALTH CHECK ====================
+
+app.get("/health", (req, res) => {
+
+    res.json({
+
+        success: true,
+
+        status: "Backend Healthy 🚀"
+
+    });
+
+});
+
+// ==================== START SERVER ====================
+
 app.listen(PORT, () => {
-  console.log(`✨ Nithyasree's Portfolio Backend running on http://localhost:${PORT}`);
-  console.log(`📁 Data stored in: ${dataFile}`);
+
+    console.log("========================================");
+    console.log("🚀 Nithyasree Portfolio Backend Running");
+    console.log(`🌐 http://localhost:${PORT}`);
+    console.log("🐘 PostgreSQL Connected");
+    console.log("========================================");
+
 });

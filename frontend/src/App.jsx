@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ChevronDown, Mail, Plus, Trash2 } from 'lucide-react';
 import { FaGithub, FaLinkedin } from 'react-icons/fa';
 // ✅ FIXED: Better API URL handling with fallback
-const API = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const API = import.meta.env.VITE_API_URL;
 
 const App = () => {
   const [currentPage, setCurrentPage] = useState('home');

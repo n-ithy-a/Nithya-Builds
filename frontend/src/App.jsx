@@ -29,6 +29,7 @@ const App = () => {
   }, []);
 
   // ✅ NEW: Centralized function to load blogs
+  // ✅ NEW: Centralized function to load blogs
   const loadBlogs = async () => {
     try {
       setLoading(true);
@@ -39,12 +40,16 @@ const App = () => {
         throw new Error(`Failed to load blogs: ${response.status}`);
       }
 
-     const data = await response.json();
+      const data = await response.json();
+      
+      // ✅ FIX: Ensure data is an array, then filter it by category
+      const blogList = Array.isArray(data) ? data : [];
 
-    setBlogs({
-      productManager: data.productManager || [],
-      projects: data.projects || []
-    });
+      setBlogs({
+        productManager: blogList.filter(blog => blog.category === 'productManager'),
+        projects: blogList.filter(blog => blog.category === 'projects')
+      });
+
     } catch (err) {
       console.error('Error loading blogs:', err);
       setError('Failed to load blogs. Please refresh the page.');
